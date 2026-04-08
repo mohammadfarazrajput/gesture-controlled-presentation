@@ -2,78 +2,53 @@ import cv2
 import mediapipe as mp
 from collections import deque
 import time
-import pyautogui
 
-def main():
-    mp_hands = mp.solutions.hands
-    hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1,
-                           min_detection_confidence=0.7, min_tracking_confidence=0.7)
-    mp_draw = mp.solutions.drawing_utils
+class GestureDetector:
+    def __init__(self):
+        self.mp_hands = mp.solutions.hands
+        self.hands = self.mp_hands.Hands(
+            static_image_mode=False, max_num_hands=1,
+            min_detection_confidence=0.7, min_tracking_confidence=0.7
+        )
+        self.mp_draw = mp.solutions.drawing_utils
+        self.x_history = deque(maxlen=8)
+        self.swipe_threshold = 0.18
+        self.last_swipe_time = 0
+        self.cooldown = 0.8
 
-    cap = cv2.VideoCapture(0)
-
-    x_history = deque(maxlen=8)
-    swipe_threshold = 0.18
-    last_swipe_time = 0
-    cooldown = 0.8
-
-    print("🎉 Full gesture control started! Open your presentation in slideshow mode.")
-    print("Swipe RIGHT → Next | Swipe LEFT → Previous | Press 'q' to quit")
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        frame = cv2.flip(frame, 1)
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        results = hands.process(rgb)
-
+    def process_frame(self, frame):
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.hands.process(rgb_frame)
         gesture = None
+
         if results.multi_hand_landmarks:
             hand_landmarks = results.multi_hand_landmarks[0]
-            mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+            self.mp_draw.draw_landmarks(
+                frame, hand_landmarks, self.mp_hands.HAND_CONNECTIONS,
+                self.mp_draw.DrawingSpec(color=(0, 255, 0), thickness=2),
+                self.mp_draw.DrawingSpec(color=(255, 0, 0), thickness=2)
+            )
 
-            current_x = hand_landmarks.landmark[8].x
-            x_history.append(current_x)
+            current_x = hand_landmarks.landmark[self.mp_hands.HandLandmark.INDEX_FINGER_TIP].x
+            self.x_history.append(current_x)
 
-            if len(x_history) == 8:
-                dx = x_history[-1] - x_history[0]
+            if len(self.x_history) == 8:
+                dx = self.x_history[-1] - self.x_history[0]
                 current_time = time.time()
-                if current_time - last_swipe_time > cooldown:
-                    if dx > swipe_threshold:
-                        pyautogui.press('right')
+                if current_time - self.last_swipe_time > self.cooldown:
+                    if dx > self.swipe_threshold:
                         gesture = "SWIPE_RIGHT"
-                        print("✅ Next slide")
-                        last_swipe_time = current_time
-                        x_history.clear()
-                    elif dx < -swipe_threshold:
-                        pyautogui.press('left')
+                        self.last_swipe_time = current_time
+                        self.x_history.clear()
+                    elif dx < -self.swipe_threshold:
                         gesture = "SWIPE_LEFT"
-                        print("✅ Previous slide")
-                        last_swipe_time = current_time
-                        x_history.clear()
-
+                        self.last_swipe_time = current_time
+                        self.x_history.clear()
         else:
-            if x_history:
-                x_history.clear()
+            if self.x_history:
+                self.x_history.clear()
 
-        cv2.putText(frame, "Gesture Controlled Presentation", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        if gesture == "SWIPE_RIGHT":
-            cv2.putText(frame, "NEXT SLIDE →", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 255, 0), 3)
-        elif gesture == "SWIPE_LEFT":
-            cv2.putText(frame, "← PREV SLIDE", (50, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
+        return frame, gesture
 
-        cv2.putText(frame, "Swipe hand LEFT / RIGHT", (10, 470), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 2)
-
-        cv2.imshow("Gesture Control", frame)
-
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-    cap.release()
-    hands.close()
-    cv2.destroyAllWindows()
-
-if __name__ == "__main__":
-    main()
+    def release(self):
+        self.hands.close()
